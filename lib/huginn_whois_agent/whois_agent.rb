@@ -16,6 +16,8 @@ module Agents
 
       `debug` is used to verbose mode.
 
+      `timeout` is the timeout limit, the client raises a Timeout::Error exception.
+
       `expected_receive_period_in_days` is used to determine if the Agent is working. Set it to the maximum number of days
       that you anticipate passing without this Agent receiving an incoming Event.
       MD
@@ -35,6 +37,7 @@ module Agents
         'debug' => 'false',
         'expected_receive_period_in_days' => '2',
         'domain' => '',
+        'timeout' => '5',
         'type' => 'registered',
         'changes_only' => 'true'
       }
@@ -42,6 +45,7 @@ module Agents
 
     form_configurable :expected_receive_period_in_days, type: :string
     form_configurable :domain, type: :string
+    form_configurable :timeout, type: :number
     form_configurable :changes_only, type: :boolean
     form_configurable :debug, type: :boolean
     form_configurable :type, type: :array, values: ['registered', 'available']
@@ -54,6 +58,10 @@ module Agents
 
       unless options['domain'].present?
         errors.add(:base, "domain is a required field")
+      end
+
+      unless options['timeout'].present?
+        errors.add(:base, "timeout is a required field")
       end
 
       if options.has_key?('debug') && boolify(options['debug']).nil?
@@ -75,15 +83,25 @@ module Agents
 
     private
 
-    def is_registered()
-
-      record = Whois.whois(interpolated['domain'])
+    def whois_check()
+      whois = Whois::Client.new(:timeout => interpolated['timeout'].to_i)
+      record = whois.lookup(interpolated['domain'])
       parser = record.parser
 
       if interpolated['debug'] == 'true'
-        log "registered is #{parser.registered?}"
+        log "parser :"
+        log parser.inspect()
       end
 
+      return parser
+    end
+
+    def is_registered()
+
+      parser =  whois_check()
+      if interpolated['debug'] == 'true'
+        log "registered is #{parser.registered?}"
+      end
       if interpolated['changes_only'] == 'true'
         if parser.registered? != memory['is_registered']
           create_event :payload => { 'domain' => "#{interpolated['domain']}", 'registered' => "#{parser.registered?}" }
@@ -99,9 +117,7 @@ module Agents
 
     def is_available()
 
-      record = Whois.whois(interpolated['domain'])
-      parser = record.parser
-
+      parser =  whois_check()
       if interpolated['debug'] == 'true'
         log "available is #{parser.available?}"
       end
